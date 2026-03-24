@@ -1,0 +1,5 @@
+# No external dependencies required for the CLI/Bot version.
+# Pure Python Standard Library (datetime, hashlib, random)
+
+# For the Web Version (app.py):
+Flask>=2.0.0
