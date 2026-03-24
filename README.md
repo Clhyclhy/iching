@@ -26,35 +26,29 @@
 *   Python 3.6+
 *   无需安装额外的 pip 包。
 
-### 2. 调用示例
+### 2. CLI/代码调用示例
+（见上文）
 
-在你的主程序或服务器代码中：
+### 3. Web 网页版部署
 
-```python
-from iching import IChingBot
+1.  安装依赖：
+    ```bash
+    pip install Flask
+    ```
 
-# 初始化
-bot = IChingBot()
+2.  启动 Web 服务器：
+    ```bash
+    python app.py
+    ```
 
-# 当收到用户消息时调用 chat 方法
-# user_id: 用户的唯一标识符 (str)
-# message: 用户发送的文本内容 (str)
-response = bot.chat(user_id="user_123", message="今日运势")
-print(response)
-
-# 起卦流程示例
-# 1. 用户发送 "起卦"
-reply1 = bot.chat("user_123", "起卦") 
-# reply1 -> "请给我三个数字..."
-
-# 2. 用户发送数字 "3 5 7"
-reply2 = bot.chat("user_123", "3 5 7")
-# reply2 -> "🔮 算卦结果: ..."
-```
+3.  浏览器访问：
+    *   打开 `http://localhost:5000` 即可看到网页版聊天界面。
+    *   支持多用户会话隔离（基于浏览器 Cookie/Session）。
 
 ## 注意事项
 
-*   **数据持久化**：当前的 `user_states` 和 `user_data` 存储在内存字典中。如果服务器重启，用户的“每日已算”状态会重置。如果需要持久化，建议修改 `__init__` 与数据读写逻辑对接数据库（如 Redis 或 SQL）。
+*   **数据持久化**：当前的 `user_states` 和 `user_data` 存储在内存字典中。服务器重启后数据会丢失。
+*   **Web 安全**：`app.py` 中的 `secret_key` 目前是生成的随机值，每次重启服务器会导致旧 Session 失效。生产环境建议设置固定的环境变量。
 *   **时区**：代码内置 `datetime.timezone(datetime.timedelta(hours=8))` 以强制使用北京时间，不受服务器本地时区影响。
 
 ## 修改配置
