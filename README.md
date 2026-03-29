@@ -44,7 +44,14 @@
 3.  浏览器访问：
     *   打开 `http://localhost:5000` 即可看到网页版聊天界面。
     *   支持多用户会话隔离（基于浏览器 Cookie/Session）。
+### 4. 生产环境部署建议
 
+*   建议使用 Gunicorn 进行部署（Linux服务器推荐）：
+    ```bash
+    pip install gunicorn
+    gunicorn -w 4 -b 0.0.0.0:8000 app:app
+    ```
+    这样可以获得更好的并发性能。
 ## 注意事项
 
 *   **数据持久化**：当前的 `user_states` 和 `user_data` 存储在内存字典中。服务器重启后数据会丢失。
