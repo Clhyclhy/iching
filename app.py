@@ -1,5 +1,8 @@
 from flask import Flask, render_template, request, jsonify, session
-from iching import IChingBot
+try:
+    from .iching import IChingBot
+except ImportError:
+    from iching import IChingBot
 import uuid
 import os
 

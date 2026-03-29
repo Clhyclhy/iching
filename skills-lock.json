@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "astrbot-plugin-dev": {
+      "source": "camera-2018/astrbot-plugin-dev-skill",
+      "sourceType": "github",
+      "computedHash": "826a56dfb4d07897f3136d6960d1281e7bceaab7ed88b7e006fbc139c1f430a9"
+    }
+  }
+}
