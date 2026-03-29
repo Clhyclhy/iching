@@ -1,4 +1,4 @@
-name: astrbot_plugin_iching
+name: 每日算卦
 desc: 易经算卦插件，支持今日运势与数字起卦（每日限次）。
 version: v1.1.0
 author: Luna
