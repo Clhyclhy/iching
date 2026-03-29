@@ -2,7 +2,8 @@
 # Pure Python Standard Library (datetime, hashlib, random)
 
 # For the Web Version (app.py):
-Flask>=2.0.0
+Quart>=0.19.0
+hypercorn>=0.17.0
 
 # Optional: For production deployment (Linux)
 # gunicorn>=20.1.0

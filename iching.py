@@ -7,18 +7,28 @@ Description: 提供今日运势查看和梅花易数/数字起卦功能。支持
 import datetime
 from datetime import timedelta, timezone
 import hashlib
+import json
+from pathlib import Path
 import random
+import threading
 
 class IChingBot:
     """
     易经算卦核心类
     """
-    def __init__(self):
+    def __init__(self, data_dir=None):
         # 记录用户当前对话状态 {user_id: 'state'}
-        self.user_states = {} 
+        self.user_states = {}
         # 记录用户持久化数据 {user_id: {'last_cast_date': date_obj}}
-        self.user_data = {}   
-        
+        self.user_data = {}
+        self._lock = threading.RLock()
+        self._data_file = None
+
+        if data_dir:
+            data_path = Path(data_dir)
+            data_path.mkdir(parents=True, exist_ok=True)
+            self._data_file = data_path / "state.json"
+
         # 定义北京时区 (UTC+8)
         self.beijing_tz = timezone(timedelta(hours=8))
         
@@ -119,6 +129,104 @@ class IChingBot:
         self.lucky_activities = ["出行", "交易", "动土", "祈福", "嫁娶", "移徙", "开市", "安床", "入宅", "纳财", "祭祀", "修造", "上梁", "栽种"]
         self.unlucky_activities = ["安葬", "探病", "词讼", "行丧", "破土", "掘井", "开仓", "伐木", "作灶", "针灸"]
 
+        self._load_state()
+
+    @staticmethod
+    def _date_to_str(date_obj):
+        return date_obj.isoformat()
+
+    @staticmethod
+    def _str_to_date(date_str):
+        try:
+            return datetime.date.fromisoformat(date_str)
+        except (TypeError, ValueError):
+            return None
+
+    def _today_bj(self):
+        return datetime.datetime.now(self.beijing_tz).date()
+
+    def _load_state(self):
+        if not self._data_file or not self._data_file.exists():
+            return
+
+        try:
+            raw = json.loads(self._data_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+
+        user_states = raw.get("user_states")
+        if isinstance(user_states, dict):
+            self.user_states = {
+                str(k): str(v) for k, v in user_states.items() if isinstance(v, str)
+            }
+
+        raw_user_data = raw.get("user_data")
+        if isinstance(raw_user_data, dict):
+            parsed_user_data = {}
+            for user_id, info in raw_user_data.items():
+                if not isinstance(info, dict):
+                    continue
+                last_date = self._str_to_date(info.get("last_cast_date"))
+                if last_date is None:
+                    continue
+                parsed_user_data[str(user_id)] = {"last_cast_date": last_date}
+            self.user_data = parsed_user_data
+
+    def _save_state_locked(self):
+        if not self._data_file:
+            return
+
+        serializable_user_data = {}
+        for user_id, info in self.user_data.items():
+            if not isinstance(info, dict):
+                continue
+            last_date = info.get("last_cast_date")
+            if isinstance(last_date, datetime.date):
+                serializable_user_data[user_id] = {
+                    "last_cast_date": self._date_to_str(last_date)
+                }
+
+        payload = {
+            "user_states": self.user_states,
+            "user_data": serializable_user_data,
+        }
+
+        tmp_file = self._data_file.with_suffix(".tmp")
+        try:
+            tmp_file.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp_file.replace(self._data_file)
+        except OSError:
+            return
+
+    def save_state(self):
+        with self._lock:
+            self._save_state_locked()
+
+    def can_cast_today(self, user_id):
+        with self._lock:
+            today_bj = self._today_bj()
+            user_info = self.user_data.get(user_id, {})
+            return user_info.get("last_cast_date") != today_bj
+
+    def cast_hexagram_once(self, user_id, nums):
+        with self._lock:
+            today_bj = self._today_bj()
+            user_info = self.user_data.get(user_id, {})
+            last_date = user_info.get("last_cast_date")
+            if last_date == today_bj:
+                return "🚫 今日已起过卦。每日00:00刷新，卦不敢算尽，畏天道无常，请明日再来。"
+
+            response = self.calculate_hexagram(nums)
+            if user_id not in self.user_data:
+                self.user_data[user_id] = {}
+            self.user_data[user_id]["last_cast_date"] = today_bj
+            self.user_states[user_id] = "idle"
+            self._save_state_locked()
+            return response
+
     def get_ganzhi_date(self, date):
         """
         计算简单的日干支（以2024-03-01甲子日为基准）
@@ -160,7 +268,15 @@ class IChingBot:
         """
         根据三个数字起卦 (梅花易数简易变种)
         """
-        n1, n2, n3 = nums
+        if not isinstance(nums, (list, tuple)):
+            raise ValueError("请输入三个整数。")
+        if len(nums) != 3:
+            raise ValueError("请提供三个数字，中间用空格分开。")
+
+        try:
+            n1, n2, n3 = (int(nums[0]), int(nums[1]), int(nums[2]))
+        except (TypeError, ValueError):
+            raise ValueError("输入格式有误，请输入三个整数。") from None
         
         # 上卦: n1 % 8
         upper = n1 % 8
@@ -193,64 +309,42 @@ class IChingBot:
         :param message: 用户发送的消息文本
         :return: 机器人的回复文本
         """
-        state = self.user_states.get(user_id, 'idle')
-        # 获取北京时间日期
-        today_bj = datetime.datetime.now(self.beijing_tz).date()
-        
-        if message == "今日运势":
-            return self.get_today_fortune()
-            
-        elif message == "起卦":
-            # 检查今日是否已起卦 (北京时间)
-            user_info = self.user_data.get(user_id, {})
-            last_date = user_info.get('last_cast_date')
-            
-            if last_date == today_bj:
-                return "🚫 今日已起过卦。每日00:00刷新，卦不敢算尽，畏天道无常，请明日再来。"
-            
-            self.user_states[user_id] = 'awaiting_numbers'
-            return "请给我三个数字（例如：3 5 7），我会根据这三个数字为你起卦。"
-            
-        elif state == 'awaiting_numbers':
-            # 尝试解析数字
-            try:
-                # 兼容中文逗号和空格
-                clean_msg = message.replace(',', ' ').replace('，', ' ')
-                parts = clean_msg.split()
-                if len(parts) != 3:
-                    return "请提供三个数字，中间用空格分开。"
-                
-                nums = [int(p) for p in parts]
-                response = self.calculate_hexagram(nums)
-                
-                # 记录成功起卦日期 (北京时间)，更新用户状态
-                if user_id not in self.user_data:
-                    self.user_data[user_id] = {}
-                self.user_data[user_id]['last_cast_date'] = today_bj
-                
-                # 重置状态
-                self.user_states[user_id] = 'idle'
-                return response
-            except ValueError:
-                return "输入格式有误，请输入三个整数。"
-                
-        else:
-            return "我是算卦插件。请输入【今日运势】查看运势，或输入【起卦】进行排盘。"
+        if not isinstance(user_id, str) or not user_id:
+            return "无法识别用户身份，请稍后再试。"
+        if not isinstance(message, str):
+            return "输入格式有误，请输入文本消息。"
 
-# 模块自测代码
-if __name__ == "__main__":
-    bot = IChingBot()
-    print("系统: 算卦插件已启动。请输入【今日运势】或【起卦】进行测试。(输入 exit 退出)")
-    
-    while True:
-        try:
-            user_input = input("User: ")
-            if not user_input or user_input.lower() == 'exit':
-                break
-            
-            # 使用固定 user_id 进行测试，每次重启脚本会清空内存数据，方便测试
-            response = bot.chat("test_user_local", user_input)
-            print(f"Bot: {response}")
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            break
+        with self._lock:
+            state = self.user_states.get(user_id, "idle")
+            today_bj = self._today_bj()
+
+            if message == "今日运势":
+                return self.get_today_fortune()
+
+            if message == "起卦":
+                user_info = self.user_data.get(user_id, {})
+                last_date = user_info.get("last_cast_date")
+                if last_date == today_bj:
+                    return "🚫 今日已起过卦。每日00:00刷新，卦不敢算尽，畏天道无常，请明日再来。"
+
+                self.user_states[user_id] = "awaiting_numbers"
+                self._save_state_locked()
+                return "请给我三个数字（例如：3 5 7），我会根据这三个数字为你起卦。"
+
+            if state == "awaiting_numbers":
+                try:
+                    # 兼容中文逗号和空格
+                    clean_msg = message.replace(",", " ").replace("，", " ")
+                    parts = clean_msg.split()
+                    response = self.calculate_hexagram(parts)
+
+                    if user_id not in self.user_data:
+                        self.user_data[user_id] = {}
+                    self.user_data[user_id]["last_cast_date"] = today_bj
+                    self.user_states[user_id] = "idle"
+                    self._save_state_locked()
+                    return response
+                except ValueError as exc:
+                    return str(exc)
+
+            return "我是算卦插件。请输入【今日运势】查看运势，或输入【起卦】进行排盘。"
